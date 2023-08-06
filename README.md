@@ -1,2 +1,2 @@
 # azure-kubernetes-services
-This is azure kubernetes services by using terraform file 
+Deployment containers in Azure Kubernetes Services using Terraform
