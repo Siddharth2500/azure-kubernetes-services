@@ -1,2 +1,2 @@
 # azure-kubernetes-services
-Deployment containers in Azure Kubernetes Services using Terraform
+Deploy the containers in Azure Kubernetes Services using Terraform
