@@ -1,0 +1,87 @@
+name: Deploy AKS using Terraform
+on: [push]
+
+jobs:
+  deploy-infrastructure:
+    runs-on: ubuntu-latest
+
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: terraform plan
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+
+  build:
+    needs: deploy-infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v3
+
+      - name: Azure login
+        id: login
+        uses: azure/login@v1.4.3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to Azure Container Registry
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            registryId=$(az acr show --name sidacr6082023 --resource-group acr-aks-rg --query id --output tsv)
+            MSYS_NO_PATHCONV=1 az role assignment create --assignee ${{ secrets.ARM_CLIENT_ID }} --scope $registryId --role AcrPush
+
+      - name: "Build and push image"
+        uses: azure/docker-login@v1
+        with:
+          login-server: sidacr6082023.azurecr.io
+          username: ${{ secrets.ARM_CLIENT_ID }}
+          password: ${{ secrets.ARM_CLIENT_SECRET }}
+      - run: |
+          docker build ./UserApi -t sidacr6082023.azurecr.io/userapi
+          docker push sidacr6082023.azurecr.io/userapi
+          docker build ./CourseApi -t sidacr6082023.azurecr.io/courseapi
+          docker push sidacr6082023.azurecr.io/courseapi
+          docker build ./TasksApi -t sidacr6082023.azurecr.io/tasksapi
+          docker push sidacr6082023.azurecr.io/tasksapi
+
+      - name: Set AKS context
+        id: set-context
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: "acr-aks-rg"
+          cluster-name: "terraform-aks"
+
+      - name: Setup kubectl
+        id: install-kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Deploy to AKS
+        id: deploy-aks
+        uses: Azure/k8s-deploy@v4
+        with:
+          namespace: "default"
+          manifests: |
+            manifests/userapi-deployment.yaml
+            manifests/courseapi-deployment.yaml
+            manifests/tasksapi-deployment.yaml
+          images: |
+            sidacr6082023.azurecr.io/userapi/userapi
+            sidacr6082023.azurecr.io/courseapi/courseapi
+            sidacr6082023.azurecr.io/tasksapi/tasksapi
+          pull-images: false
